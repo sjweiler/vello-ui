@@ -1,0 +1,36 @@
+[package]
+name = "vui-winit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Winit desktop host for VUI"
+documentation = "https://docs.rs/vui-winit"
+
+[features]
+default = ["accessibility", "system-fonts"]
+accessibility = ["dep:accesskit_winit", "dep:vui-accesskit"]
+system-fonts = ["dep:vui-text"]
+
+[dependencies]
+anyhow.workspace = true
+arboard.workspace = true
+accesskit_winit = { workspace = true, optional = true }
+pollster.workspace = true
+notify-rust.workspace = true
+tray-icon.workspace = true
+rfd.workspace = true
+vello.workspace = true
+vui-core.workspace = true
+vui-accesskit = { workspace = true, optional = true }
+vui-text = { workspace = true, optional = true }
+vui-vello.workspace = true
+vui-session.workspace = true
+vui-platform.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

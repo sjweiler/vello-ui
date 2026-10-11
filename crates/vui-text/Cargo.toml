@@ -1,0 +1,19 @@
+[package]
+name = "vui-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Parley and Fontique text shaping for VUI"
+documentation = "https://docs.rs/vui-text"
+
+[dependencies]
+fontique.workspace = true
+parley.workspace = true
+vui-core.workspace = true
+
+[lints]
+workspace = true

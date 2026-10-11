@@ -1,0 +1,18 @@
+[package]
+name = "vui-resources"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Background file, directory, and image resources for VUI"
+documentation = "https://docs.rs/vui-resources"
+
+[dependencies]
+image.workspace = true
+vui-core.workspace = true
+
+[lints]
+workspace = true

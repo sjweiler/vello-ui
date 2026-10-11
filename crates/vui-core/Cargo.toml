@@ -1,0 +1,18 @@
+[package]
+name = "vui-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Renderer- and platform-neutral retained UI runtime"
+documentation = "https://docs.rs/vui-core"
+
+[dependencies]
+linebender_resource_handle.workspace = true
+unicode-segmentation.workspace = true
+
+[lints]
+workspace = true

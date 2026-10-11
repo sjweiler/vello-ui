@@ -1,0 +1,16 @@
+[package]
+name = "vui-minimal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Minimal recommended VUI desktop application template"
+
+[dependencies]
+anyhow.workspace = true
+vui-core.workspace = true
+vui-winit.workspace = true
+
+[lints]
+workspace = true

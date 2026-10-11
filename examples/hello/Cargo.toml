@@ -1,0 +1,19 @@
+[package]
+name = "vui-hello"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Comprehensive native VUI component showcase"
+
+[dependencies]
+anyhow.workspace = true
+vui-core.workspace = true
+vui-winit.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+vui-platform-linux.workspace = true
+
+[lints]
+workspace = true

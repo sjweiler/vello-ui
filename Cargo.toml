@@ -1,0 +1,68 @@
+[workspace]
+members = [
+    "crates/vui-core",
+    "crates/vui-accesskit",
+    "crates/vui-text",
+    "crates/vui-vello",
+    "crates/vui-winit",
+    "crates/vui-testing",
+    "crates/vui-resources",
+    "crates/vui-session",
+    "crates/vui-platform",
+    "crates/vui-platform-linux",
+    "crates/vui-snapshot",
+    "examples/hello",
+    "examples/minimal",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.92"
+readme = "README.md"
+keywords = ["gui", "desktop", "vello", "winit", "accessibility"]
+categories = ["gui", "rendering"]
+
+[workspace.dependencies]
+accesskit = "0.25.1"
+accesskit_winit = "0.34.1"
+arboard = "3.6.1"
+anyhow = "1.0"
+linebender_resource_handle = "0.1.1"
+pollster = "0.4"
+parley = "0.11.1"
+vello = "0.11.0"
+winit = "0.30.13"
+unicode-segmentation = "1.13.3"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+notify-rust = "4.11"
+tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"] }
+ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "inhibit", "notification", "open_uri", "power_profile_monitor", "settings"] }
+async-io = "2.6"
+futures-util = "0.3"
+zbus = "5.19"
+fontique = "0.11.1"
+vui-accesskit = { version = "0.1.0", path = "crates/vui-accesskit" }
+vui-core = { version = "0.1.0", path = "crates/vui-core" }
+vui-platform = { version = "0.1.0", path = "crates/vui-platform" }
+vui-platform-linux = { version = "0.1.0", path = "crates/vui-platform-linux" }
+vui-resources = { version = "0.1.0", path = "crates/vui-resources" }
+vui-session = { version = "0.1.0", path = "crates/vui-session" }
+vui-snapshot = { version = "0.1.0", path = "crates/vui-snapshot" }
+vui-testing = { version = "0.1.0", path = "crates/vui-testing" }
+vui-text = { version = "0.1.0", path = "crates/vui-text" }
+vui-vello = { version = "0.1.0", path = "crates/vui-vello" }
+vui-winit = { version = "0.1.0", path = "crates/vui-winit" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"

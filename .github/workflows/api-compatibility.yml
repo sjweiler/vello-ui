@@ -1,0 +1,16 @@
+name: API compatibility
+
+on:
+  pull_request:
+
+jobs:
+  semver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: v0.1.0
+          package: vui-core,vui-accesskit,vui-platform,vui-resources,vui-session,vui-testing,vui-text,vui-vello,vui-winit,vui-snapshot,vui-platform-linux

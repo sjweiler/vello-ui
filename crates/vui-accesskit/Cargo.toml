@@ -1,0 +1,18 @@
+[package]
+name = "vui-accesskit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "AccessKit tree conversion for VUI semantics"
+documentation = "https://docs.rs/vui-accesskit"
+
+[dependencies]
+accesskit.workspace = true
+vui-core.workspace = true
+
+[lints]
+workspace = true

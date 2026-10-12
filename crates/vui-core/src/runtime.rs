@@ -21,6 +21,7 @@ pub struct UiRuntime {
     root: Box<dyn Widget>,
     viewport: Size,
     theme: Theme,
+    surface: RootSurface,
     text: Box<dyn TextSystem>,
     focused: Option<WidgetId>,
     needs_layout: bool,
@@ -36,6 +37,13 @@ pub struct UiRuntime {
     tasks: HashMap<TaskId, ActiveTask>,
     pending_tasks: Vec<TaskRequest>,
     platform_commands: Vec<crate::PlatformCommand>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RootSurface {
+    #[default]
+    Opaque,
+    Transparent,
 }
 
 struct ActiveTask {
@@ -65,6 +73,7 @@ impl UiRuntime {
             root,
             viewport: Size::ZERO,
             theme: Theme::default(),
+            surface: RootSurface::Opaque,
             text: Box::<BootstrapTextSystem>::default(),
             focused: None,
             needs_layout: true,
@@ -122,6 +131,24 @@ impl UiRuntime {
             self.needs_layout = true;
             self.needs_paint = true;
         }
+    }
+
+    /// Enables a transparent root surface for compositor overlays.
+    pub fn set_transparent(&mut self, transparent: bool) {
+        let surface = if transparent {
+            RootSurface::Transparent
+        } else {
+            RootSurface::Opaque
+        };
+        if self.surface != surface {
+            self.surface = surface;
+            self.needs_paint = true;
+        }
+    }
+
+    /// Requests a fresh paint without invalidating widget layout.
+    pub fn request_redraw(&mut self) {
+        self.needs_paint = true;
     }
 
     pub fn handle_event(&mut self, event: &Event) -> bool {
@@ -197,11 +224,13 @@ impl UiRuntime {
         }
 
         let mut paint = PaintList::default();
-        paint.push(PaintOp::FillRect {
-            rect: Rect::from_origin_size(Point::new(0.0, 0.0), self.viewport),
-            color: self.theme.window,
-            radius: 0.0,
-        });
+        if self.surface == RootSurface::Opaque {
+            paint.push(PaintOp::FillRect {
+                rect: Rect::from_origin_size(Point::new(0.0, 0.0), self.viewport),
+                color: self.theme.window,
+                radius: 0.0,
+            });
+        }
         self.root.paint(&mut PaintCtx::new(&mut paint, &self.theme));
         self.paint_drag_preview(&mut paint);
         let mut semantics = Vec::new();

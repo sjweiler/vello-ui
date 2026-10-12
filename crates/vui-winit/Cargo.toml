@@ -19,15 +19,13 @@ system-fonts = ["dep:vui-text"]
 anyhow.workspace = true
 arboard.workspace = true
 accesskit_winit = { workspace = true, optional = true }
-pollster.workspace = true
 notify-rust.workspace = true
 tray-icon.workspace = true
 rfd.workspace = true
-vello.workspace = true
 vui-core.workspace = true
+vui-ash.workspace = true
 vui-accesskit = { workspace = true, optional = true }
 vui-text = { workspace = true, optional = true }
-vui-vello.workspace = true
 vui-session.workspace = true
 vui-platform.workspace = true
 winit.workspace = true

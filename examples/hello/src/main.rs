@@ -190,10 +190,36 @@ fn settings_content(
     let theme_sender = sender.clone();
     let name_sender = sender.clone();
     let menu_commands = commands.to_vec();
-    ScrollView::new(Padding::new(
-        Insets::all(24.0),
-        Column::new([
-            Box::new(Label::new("VUI settings — مرحبا").text_size(24.0)) as Box<dyn Widget>,
+    let children: Vec<Box<dyn Widget>> = match model.active_tab {
+        1 => vec![
+            Box::new(Label::new("Appearance settings").text_size(24.0)),
+            Box::new(Label::new(
+                "Theme and motion preferences update the whole application immediately.",
+            )),
+            Box::new(Checkbox::new(
+                "Use dark theme",
+                model.dark_theme,
+                move |checked| theme_sender.emit(Message::ThemeChanged(checked)),
+            )),
+            Box::new(Checkbox::new(
+                "Enable animations",
+                model.animations,
+                move |checked| animation_sender.emit(Message::AnimationsChanged(checked)),
+            )),
+        ],
+        2 => vec![
+            Box::new(Label::new("Keyboard shortcuts").text_size(24.0)),
+            Box::new(Label::new("Ctrl/Cmd+1 — General")),
+            Box::new(Label::new("Ctrl/Cmd+2 — Appearance")),
+            Box::new(Label::new("Ctrl/Cmd+3 — Keyboard")),
+            Box::new(Label::new("Ctrl/Cmd+D — Toggle theme")),
+            Box::new(Label::new("Ctrl/Cmd+S — Apply changes")),
+            Box::new(Label::new(
+                "Tab moves focus; Enter or Space activates the focused control.",
+            )),
+        ],
+        _ => vec![
+            Box::new(Label::new("General settings — مرحبا").text_size(24.0)),
             Box::new(Label::new(format!(
                 "Applied {} time(s) — display name: {}",
                 model.applied,
@@ -202,29 +228,19 @@ fn settings_content(
                 } else {
                     &model.display_name
                 }
-            ))) as Box<dyn Widget>,
-            Box::new(Checkbox::new(
-                "Enable animations",
-                model.animations,
-                move |checked| animation_sender.emit(Message::AnimationsChanged(checked)),
-            )) as Box<dyn Widget>,
-            Box::new(Checkbox::new(
-                "Use dark theme",
-                model.dark_theme,
-                move |checked| theme_sender.emit(Message::ThemeChanged(checked)),
-            )) as Box<dyn Widget>,
+            ))),
             Box::new(Keyed::new(
                 "display-name",
                 TextField::new(model.display_name.clone(), move |value| {
                     name_sender.emit(Message::DisplayNameChanged(value.to_owned()));
                 })
                 .placeholder("Display name"),
-            )) as Box<dyn Widget>,
+            )),
             Box::new(
                 TextArea::new("", |value| println!("notes: {value:?}"))
                     .placeholder("Notes")
                     .min_lines(3),
-            ) as Box<dyn Widget>,
+            ),
             Box::new(
                 Flex::row([
                     FlexChild::fixed(CommandButton::new(descriptor(commands, "settings.apply"))),
@@ -236,17 +252,20 @@ fn settings_content(
                     ),
                 ])
                 .gap(10.0),
-            ) as Box<dyn Widget>,
+            ),
             Box::new(MenuButton::new("Open command menu", move || {
                 Menu::new([
                     MenuItem::command(descriptor(&menu_commands, "theme.toggle")),
                     MenuItem::separator(),
                     MenuItem::command(descriptor(&menu_commands, "settings.apply")),
                 ])
-            })) as Box<dyn Widget>,
-            Box::new(collection_examples()) as Box<dyn Widget>,
-        ])
-        .gap(16.0),
+            })),
+            Box::new(collection_examples()),
+        ],
+    };
+    ScrollView::new(Padding::new(
+        Insets::all(24.0),
+        Column::new(children).gap(16.0),
     ))
 }
 
@@ -324,14 +343,15 @@ fn application_shell(
     sender: &DesktopSender<Message>,
     commands: &[CommandDescriptor],
     desktop: DesktopApp<Settings, Message>,
+    show_sidebar_toggle: bool,
 ) -> impl Widget + use<> {
     let tab_sender = sender.clone();
     let tabs = SizedBox::new(
         TabBar::new(
             [
-                Tab::new("Settings"),
-                Tab::new("Preview").closable(true),
-                Tab::new("Logs").closable(true),
+                Tab::new("General"),
+                Tab::new("Appearance"),
+                Tab::new("Keyboard"),
             ],
             move |index| tab_sender.emit(Message::SelectTab(index)),
         )
@@ -342,9 +362,13 @@ fn application_shell(
     )
     .fill_width();
     let palette_commands = commands.to_vec();
-    let toolbar = SizedBox::new(Toolbar::new([
-        Box::new(IconButton::new(IconName::Menu, "Toggle sidebar", || {}).tooltip("Toggle sidebar"))
-            as Box<dyn Widget>,
+    let mut toolbar_items = Vec::<Box<dyn Widget>>::new();
+    if show_sidebar_toggle {
+        toolbar_items.push(Box::new(
+            IconButton::new(IconName::Menu, "Toggle sidebar", || {}).tooltip("Toggle sidebar"),
+        ));
+    }
+    toolbar_items.extend([
         Box::new(
             IconButton::action(IconName::Command, "Command palette", move |_, ctx| {
                 ctx.show_modal(CommandPalette::new(palette_commands.clone()));
@@ -389,8 +413,8 @@ fn application_shell(
                 ),
             );
         })) as Box<dyn Widget>,
-    ]))
-    .fill_width();
+    ]);
+    let toolbar = SizedBox::new(Toolbar::new(toolbar_items)).fill_width();
     let status = SizedBox::new(StatusBar::new([
         Box::new(Label::new("Ready").text_size(13.0)) as Box<dyn Widget>,
         Box::new(Label::new("UTF-8").text_size(13.0)) as Box<dyn Widget>,
@@ -472,12 +496,13 @@ fn interface() -> impl Widget {
             &sender,
             &descriptors,
             view_desktop.clone(),
+            true,
         ))
         .fill_width()
         .fill_height();
         let wide = SplitPane::horizontal(
             sidebar(&descriptors),
-            application_shell(model, &sender, &descriptors, view_desktop.clone()),
+            application_shell(model, &sender, &descriptors, view_desktop.clone(), false),
         )
         .ratio(0.24)
         .min_pane(160.0);
@@ -512,10 +537,115 @@ fn main() -> anyhow::Result<()> {
         .title("VUI hello")
         .session_path(session_path)
         .single_instance(true)
-        .tray(showcase_tray())
-        .close_to_tray(true);
+        .tray(showcase_tray());
     #[cfg(target_os = "linux")]
     let application =
         application.platform_services(vui_platform_linux::LinuxPlatformServices::new()?);
     application.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::interface;
+    use vui_core::{Event, PaintOp, Point, PointerButton, Rect, Size, Theme, UiRuntime};
+
+    #[test]
+    fn sidebar_navigation_invokes_its_command() {
+        let mut runtime = UiRuntime::new(interface());
+        runtime.set_viewport(Size::new(1_024.0, 640.0));
+        runtime.set_reduced_motion(true);
+        let initial = runtime.render_frame().expect("initial frame");
+        let appearance = semantic_bounds(&initial.semantics, "Appearance");
+        let position = Point::new(
+            appearance.x + appearance.width * 0.5,
+            appearance.y + appearance.height * 0.5,
+        );
+
+        assert!(runtime.handle_event(&Event::PointerDown {
+            position,
+            button: PointerButton::Primary,
+            click_count: 1,
+        }));
+        assert!(runtime.handle_event(&Event::PointerUp {
+            position,
+            button: PointerButton::Primary,
+        }));
+
+        let updated = runtime.render_frame().expect("navigation frame");
+        assert!(
+            updated
+                .semantics
+                .iter()
+                .any(|node| node.label == "Appearance settings")
+        );
+        let appearance = semantic_bounds(&updated.semantics, "Appearance");
+        let selected = Theme::dark().components.ghost_button.selected.background;
+        assert!(updated.paint.operations().iter().any(|operation| matches!(
+            operation,
+            PaintOp::FillRect { rect, color, .. } if *rect == appearance && *color == selected
+        )));
+    }
+
+    #[test]
+    fn repeated_nested_scrolling_keeps_the_main_pane_positioned() {
+        let mut runtime = UiRuntime::new(interface());
+        runtime.set_viewport(Size::new(1_024.0, 640.0));
+        runtime.set_reduced_motion(true);
+        let initial = runtime.render_frame().expect("initial frame");
+        let initial_toolbar = semantic_bounds(&initial.semantics, "Toolbar");
+        let initial_tabs = semantic_bounds(&initial.semantics, "General");
+
+        for _ in 0..40 {
+            let _ = runtime.handle_event(&Event::Scroll {
+                position: Point::new(700.0, 360.0),
+                delta_x: 0.0,
+                delta_y: 1_000.0,
+            });
+            let _ = runtime.render_frame();
+        }
+
+        runtime.request_paint();
+        let frame = runtime.render_frame().expect("bottom frame");
+        assert_eq!(
+            semantic_bounds(&frame.semantics, "Toolbar"),
+            initial_toolbar
+        );
+        assert_eq!(semantic_bounds(&frame.semantics, "General"), initial_tabs);
+
+        let visible_item = semantic_bounds(&frame.semantics, "Workspace item 00000");
+        assert!(visible_item.x >= initial_toolbar.x);
+        assert!(visible_item.y < 640.0 && visible_item.y + visible_item.height > 90.0);
+    }
+
+    #[test]
+    fn sidebar_toggle_is_only_visible_in_the_compact_layout() {
+        let mut runtime = UiRuntime::new(interface());
+        runtime.set_reduced_motion(true);
+
+        runtime.set_viewport(Size::new(640.0, 640.0));
+        let compact = runtime.render_frame().expect("compact frame");
+        assert!(
+            compact
+                .semantics
+                .iter()
+                .any(|node| node.label == "Toggle sidebar")
+        );
+
+        runtime.set_viewport(Size::new(1_024.0, 640.0));
+        let desktop = runtime.render_frame().expect("desktop frame");
+        assert!(
+            desktop
+                .semantics
+                .iter()
+                .all(|node| node.label != "Toggle sidebar")
+        );
+    }
+
+    fn semantic_bounds(semantics: &[vui_core::SemanticNode], label: &str) -> Rect {
+        semantics
+            .iter()
+            .find(|node| node.label == label)
+            .unwrap_or_else(|| panic!("missing semantic node {label}"))
+            .bounds
+    }
 }

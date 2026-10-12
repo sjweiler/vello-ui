@@ -39,6 +39,10 @@ pub fn tree_update(nodes: &[SemanticNode]) -> TreeUpdate {
             SemanticRole::Button
                 | SemanticRole::Tab
                 | SemanticRole::Checkbox
+                | SemanticRole::Switch
+                | SemanticRole::RadioButton
+                | SemanticRole::Slider
+                | SemanticRole::ComboBox
                 | SemanticRole::MenuItem
                 | SemanticRole::MenuItemCheckbox
                 | SemanticRole::MenuItemRadio
@@ -46,6 +50,7 @@ pub fn tree_update(nodes: &[SemanticNode]) -> TreeUpdate {
                 | SemanticRole::Tree
                 | SemanticRole::Table
                 | SemanticRole::TextInput
+                | SemanticRole::PasswordInput
                 | SemanticRole::MultilineTextInput
         ) {
             node.add_action(Action::Focus);
@@ -55,6 +60,9 @@ pub fn tree_update(nodes: &[SemanticNode]) -> TreeUpdate {
             SemanticRole::Button
                 | SemanticRole::Tab
                 | SemanticRole::Checkbox
+                | SemanticRole::Switch
+                | SemanticRole::RadioButton
+                | SemanticRole::ComboBox
                 | SemanticRole::MenuItem
                 | SemanticRole::MenuItemCheckbox
                 | SemanticRole::MenuItemRadio
@@ -65,6 +73,10 @@ pub fn tree_update(nodes: &[SemanticNode]) -> TreeUpdate {
                 | SemanticRole::Cell
         ) {
             node.add_action(Action::Click);
+        }
+        if semantic.role == SemanticRole::Slider {
+            node.add_action(Action::Increment);
+            node.add_action(Action::Decrement);
         }
         if let Some(checked) = semantic.checked {
             node.set_toggled(Toggled::from(checked));
@@ -89,6 +101,8 @@ pub fn event_for_action(request: &ActionRequest) -> Option<Event> {
     let action = match request.action {
         Action::Click => SemanticAction::Click,
         Action::Focus => SemanticAction::Focus,
+        Action::Increment => SemanticAction::Increment,
+        Action::Decrement => SemanticAction::Decrement,
         _ => return None,
     };
     Some(Event::AccessibilityAction {
@@ -114,6 +128,12 @@ fn role(role: SemanticRole) -> Role {
         SemanticRole::Tab => Role::Tab,
         SemanticRole::Button => Role::Button,
         SemanticRole::Checkbox => Role::CheckBox,
+        SemanticRole::Switch => Role::Switch,
+        SemanticRole::RadioButton => Role::RadioButton,
+        SemanticRole::Slider => Role::Slider,
+        SemanticRole::ComboBox => Role::ComboBox,
+        SemanticRole::ProgressIndicator => Role::ProgressIndicator,
+        SemanticRole::Alert => Role::Alert,
         SemanticRole::Menu => Role::Menu,
         SemanticRole::MenuItem => Role::MenuItem,
         SemanticRole::MenuItemCheckbox => Role::MenuItemCheckBox,
@@ -127,6 +147,7 @@ fn role(role: SemanticRole) -> Role {
         SemanticRole::ColumnHeader => Role::ColumnHeader,
         SemanticRole::Cell => Role::Cell,
         SemanticRole::TextInput => Role::TextInput,
+        SemanticRole::PasswordInput => Role::PasswordInput,
         SemanticRole::MultilineTextInput => Role::MultilineTextInput,
     }
 }

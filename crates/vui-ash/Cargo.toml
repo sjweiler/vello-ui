@@ -1,0 +1,42 @@
+[package]
+name = "vui-ash"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Direct Vulkan presentation backend for VUI using ash"
+documentation = "https://docs.rs/vui-ash"
+
+[dependencies]
+ash.workspace = true
+ash-window.workspace = true
+bytemuck.workspace = true
+lyon_tessellation.workspace = true
+raw-window-handle.workspace = true
+skrifa.workspace = true
+vui-core.workspace = true
+
+[build-dependencies]
+naga.workspace = true
+
+[dev-dependencies]
+vui-text.workspace = true
+winit.workspace = true
+
+[[test]]
+name = "windowed_swapchain"
+path = "tests/windowed_swapchain.rs"
+harness = false
+
+[[bench]]
+name = "renderer"
+harness = false
+
+# This crate is the audited FFI boundary. Ash exposes Vulkan through unsafe
+# calls, so it intentionally does not inherit the workspace's unsafe-code lint.
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

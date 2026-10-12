@@ -31,6 +31,8 @@ impl WidgetId {
 pub enum SemanticAction {
     Click,
     Focus,
+    Increment,
+    Decrement,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

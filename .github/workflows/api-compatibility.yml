@@ -13,4 +13,4 @@ jobs:
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           baseline-rev: v0.1.0
-          package: vui-core,vui-accesskit,vui-platform,vui-resources,vui-session,vui-testing,vui-text,vui-vello,vui-winit,vui-snapshot,vui-platform-linux
+          package: vui-core,vui-accesskit,vui-platform,vui-resources,vui-session,vui-testing,vui-text,vui-vello,vui-ash,vui-winit,vui-snapshot,vui-platform-linux

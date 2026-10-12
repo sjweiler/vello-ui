@@ -16,12 +16,7 @@ use tray_icon::{
     Icon as TrayIconImage, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu},
 };
-use vello::{
-    AaConfig, RenderParams, Renderer, RendererOptions,
-    peniko::Color as VelloColor,
-    util::{RenderContext, RenderSurface},
-    wgpu,
-};
+use vui_ash::{GpuSceneBuilder, VulkanPresenter};
 use vui_core::{
     ClipboardRequest, CommandId, DesktopNotification, DragOperation, DragPayload, Event,
     FileDialogKind, FileDialogRequest, Key, Modifier, Modifiers, MonitorInfo, NativeMenu,
@@ -33,7 +28,6 @@ use vui_platform::{PlatformError, PlatformResponder, PlatformServices};
 use vui_session::SessionStore;
 #[cfg(feature = "system-fonts")]
 use vui_text::ParleyTextSystem;
-use vui_vello::SceneBuilder;
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
@@ -50,12 +44,12 @@ use winit::{
 ///
 /// Widgets may create additional independent windows with
 /// [`vui_core::EventCtx::open_window`]. Embedders may instead drive
-/// [`UiRuntime`] and `vui_vello::SceneBuilder` directly.
+/// [`UiRuntime`] and a renderer backend directly.
 ///
 /// # Errors
 ///
-/// Returns an error if the event loop, a native window, GPU surface, Vello
-/// renderer, or a rendered frame cannot be created or presented.
+/// Returns an error if the event loop, a native window, Vulkan renderer, or a
+/// rendered frame cannot be created or presented.
 pub fn run(title: impl Into<String>, root: impl Widget + 'static) -> Result<()> {
     run_with_options(title, root, RunOptions::default())
 }
@@ -691,16 +685,16 @@ struct ClickState {
 struct NativeWindow {
     descriptor: WindowDescriptor,
     runtime: UiRuntime,
-    renderer: Renderer,
-    surface: RenderSurface<'static>,
+    gpu_scene: GpuSceneBuilder,
+    presenter: VulkanPresenter,
     window: Arc<Window>,
-    scene_builder: SceneBuilder,
     pointer: Point,
     scale_factor: f64,
     #[cfg(feature = "accessibility")]
     accesskit: accesskit_winit::Adapter,
     last_click: Option<ClickState>,
     monitor: Option<MonitorInfo>,
+    suspended: bool,
 }
 
 struct App {
@@ -708,7 +702,6 @@ struct App {
     primary_id: UiWindowId,
     windows: HashMap<UiWindowId, NativeWindow>,
     native_ids: HashMap<WindowId, UiWindowId>,
-    render_context: RenderContext,
     fatal_error: Option<anyhow::Error>,
     clipboard: Option<arboard::Clipboard>,
     event_proxy: EventLoopProxy<UserEvent>,
@@ -741,7 +734,6 @@ impl App {
             primary_id,
             windows: HashMap::new(),
             native_ids: HashMap::new(),
-            render_context: RenderContext::new(),
             fatal_error: None,
             clipboard: None,
             event_proxy,
@@ -954,16 +946,12 @@ impl App {
             .take()
             .or_else(|| arboard::Clipboard::new().ok());
         let scale_factor = window.scale_factor();
-        let surface = pollster::block_on(self.render_context.create_surface(
-            window.clone(),
+        let presenter = VulkanPresenter::new(
+            window.as_ref(),
             physical.width.max(1),
             physical.height.max(1),
-            wgpu::PresentMode::AutoVsync,
-        ))
-        .context("create Vello render surface")?;
-        let device = &self.render_context.devices[surface.dev_id].device;
-        let renderer =
-            Renderer::new(device, RendererOptions::default()).context("create Vello renderer")?;
+        )
+        .context("create Ash Vulkan presenter")?;
         let runtime = UiRuntime::from_boxed(pending.root).with_window_id(pending.id);
         #[cfg(feature = "system-fonts")]
         let runtime = runtime.with_text_system(ParleyTextSystem::new());
@@ -981,16 +969,16 @@ impl App {
             NativeWindow {
                 descriptor,
                 runtime,
-                renderer,
-                surface,
+                gpu_scene: GpuSceneBuilder::new(),
+                presenter,
                 window: window.clone(),
-                scene_builder: SceneBuilder::new(),
                 pointer: Point::default(),
                 scale_factor,
                 #[cfg(feature = "accessibility")]
                 accesskit,
                 last_click: None,
                 monitor: monitor.clone(),
+                suspended: physical.width == 0 || physical.height == 0,
             },
         );
         if let Some(info) = monitor {
@@ -1271,12 +1259,11 @@ impl App {
     }
 
     fn resize(&mut self, id: UiWindowId, width: u32, height: u32) {
-        if width == 0 || height == 0 {
-            return;
-        }
         if let Some(window) = self.windows.get_mut(&id) {
-            self.render_context
-                .resize_surface(&mut window.surface, width, height);
+            window.suspended = !renderable_size(width, height);
+            if window.suspended {
+                return;
+            }
             window
                 .runtime
                 .set_viewport(logical_size(width, height, window.scale_factor));
@@ -1284,10 +1271,15 @@ impl App {
         }
     }
 
-    fn render(&mut self, id: UiWindowId, event_loop: &ActiveEventLoop) -> Result<()> {
+    fn render(&mut self, id: UiWindowId, _event_loop: &ActiveEventLoop) -> Result<()> {
         let Some(window) = self.windows.get_mut(&id) else {
             return Ok(());
         };
+        let physical = window.window.inner_size();
+        if window.suspended || !renderable_size(physical.width, physical.height) {
+            window.suspended = true;
+            return Ok(());
+        }
         window.runtime.advance_time(self.started_at.elapsed());
         for request in window.runtime.take_task_requests() {
             let proxy = self.event_proxy.clone();
@@ -1311,61 +1303,27 @@ impl App {
             .accesskit
             .update_if_active(|| vui_accesskit::tree_update(&frame.semantics));
         let scene = window
-            .scene_builder
-            .build(&frame.paint, window.scale_factor);
-        let device_handle = &self.render_context.devices[window.surface.dev_id];
-        window
-            .renderer
-            .render_to_texture(
-                &device_handle.device,
-                &device_handle.queue,
-                scene,
-                &window.surface.target_view,
-                &RenderParams {
-                    base_color: VelloColor::from_rgb8(0, 0, 0),
-                    width: window.surface.config.width,
-                    height: window.surface.config.height,
-                    antialiasing_method: AaConfig::Area,
-                },
-            )
-            .context("render Vello scene")?;
-
-        let surface_texture = match window.surface.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(texture) => texture,
-            wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
-                self.render_context.configure_surface(&window.surface);
-                texture
+            .gpu_scene
+            .build(&frame, window.scale_factor)
+            .map_err(anyhow::Error::msg)
+            .context("build Ash Vulkan scene")?;
+        if let Err(error) = window.presenter.present_gpu(&scene) {
+            if !error.is_device_lost() {
+                return Err(anyhow::Error::new(error).context("present Ash Vulkan frame"));
             }
-            wgpu::CurrentSurfaceTexture::Outdated => {
-                self.render_context.configure_surface(&window.surface);
+            let size = window.window.inner_size();
+            if !renderable_size(size.width, size.height) {
+                window.suspended = true;
                 return Ok(());
             }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Lost => anyhow::bail!("GPU surface was lost"),
-            wgpu::CurrentSurfaceTexture::Validation => {
-                event_loop.exit();
-                anyhow::bail!("GPU surface validation failed");
-            }
-        };
-        let surface_view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder =
-            device_handle
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("vui surface blit"),
-                });
-        window.surface.blitter.copy(
-            &device_handle.device,
-            &mut encoder,
-            &window.surface.target_view,
-            &surface_view,
-        );
-        device_handle.queue.submit([encoder.finish()]);
-        device_handle.queue.present(surface_texture);
+            window.presenter =
+                VulkanPresenter::new(window.window.as_ref(), size.width, size.height)
+                    .context("recover Ash Vulkan presenter after device loss")?;
+            window
+                .presenter
+                .present_gpu(&scene)
+                .context("present Ash Vulkan frame after device-loss recovery")?;
+        }
         Ok(())
     }
 
@@ -1902,6 +1860,10 @@ fn logical_size(width: u32, height: u32, scale: f64) -> Size {
     Size::new(f64::from(width) / scale, f64::from(height) / scale)
 }
 
+const fn renderable_size(width: u32, height: u32) -> bool {
+    width > 0 && height > 0
+}
+
 fn monitor_info(window: &Window) -> Option<MonitorInfo> {
     let monitor = window.current_monitor()?;
     Some(monitor_handle_info(&monitor))
@@ -1968,7 +1930,7 @@ fn key(key: WinitKey) -> Key {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_arguments, encode_arguments, instance_port};
+    use super::{decode_arguments, encode_arguments, instance_port, renderable_size};
 
     #[test]
     fn single_instance_arguments_round_trip() {
@@ -1982,5 +1944,19 @@ mod tests {
         let first = instance_port("dev.vui.showcase");
         assert_eq!(first, instance_port("dev.vui.showcase"));
         assert!((40_000..60_000).contains(&first));
+    }
+
+    #[test]
+    fn resize_churn_suspends_zero_sized_surfaces() {
+        for cycle in 0..10_000_u32 {
+            let (width, height) = match cycle % 5 {
+                0 => (0, 0),
+                1 => (0, cycle + 1),
+                2 => (cycle + 1, 0),
+                3 => (1, 1),
+                _ => (cycle + 1, cycle / 2 + 1),
+            };
+            assert_eq!(renderable_size(width, height), width > 0 && height > 0);
+        }
     }
 }

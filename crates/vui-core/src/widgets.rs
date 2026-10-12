@@ -336,6 +336,7 @@ impl Widget for Button {
                     ctx.request_focus(self.id);
                     ctx.set_handled();
                 }
+                crate::SemanticAction::Increment | crate::SemanticAction::Decrement => {}
             },
             Event::FocusChanged(focused) => {
                 let next = *focused == Some(self.id);
@@ -452,6 +453,13 @@ enum ScrollDrag {
     Vertical { grab: f64 },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum TextFieldMode {
+    #[default]
+    Plain,
+    Password,
+}
+
 pub struct TextField {
     id: WidgetId,
     text: String,
@@ -464,6 +472,7 @@ pub struct TextField {
     scroll_x: f64,
     scroll_y: f64,
     multiline: bool,
+    mode: TextFieldMode,
     min_lines: u32,
     bounds: Rect,
     interaction: Interaction,
@@ -493,6 +502,7 @@ impl TextField {
             scroll_x: 0.0,
             scroll_y: 0.0,
             multiline: false,
+            mode: TextFieldMode::Plain,
             min_lines: 1,
             bounds: Rect::default(),
             interaction: Interaction::default(),
@@ -512,6 +522,35 @@ impl TextField {
         self
     }
 
+    #[must_use]
+    pub fn value(&self) -> &str {
+        &self.text
+    }
+
+    pub(crate) fn replace_value(&mut self, value: impl Into<String>, ctx: &mut EventCtx) {
+        let value = value.into();
+        if self.text == value {
+            return;
+        }
+        self.record_edit(false);
+        self.text = value;
+        self.cursor = self.text.len();
+        self.anchor = self.cursor;
+        self.clear_preedit();
+        self.change(ctx);
+    }
+
+    /// Masks the rendered value and keeps it out of the semantic value tree.
+    #[must_use]
+    pub const fn password(mut self, password: bool) -> Self {
+        self.mode = if password {
+            TextFieldMode::Password
+        } else {
+            TextFieldMode::Plain
+        };
+        self
+    }
+
     fn into_multiline(mut self, min_lines: u32) -> Self {
         self.multiline = true;
         self.min_lines = min_lines.max(2);
@@ -519,14 +558,22 @@ impl TextField {
     }
 
     fn display_text(&self) -> String {
-        if self.preedit.is_empty() {
-            return self.text.clone();
+        let display = if self.preedit.is_empty() {
+            self.text.clone()
+        } else {
+            let mut display = String::with_capacity(self.text.len() + self.preedit.len());
+            display.push_str(&self.text[..self.cursor]);
+            display.push_str(&self.preedit);
+            display.push_str(&self.text[self.cursor..]);
+            display
+        };
+        if self.mode == TextFieldMode::Password {
+            // One ASCII mask byte per source byte keeps the existing byte-indexed
+            // caret and selection geometry valid for all UTF-8 input.
+            "*".repeat(display.len())
+        } else {
+            display
         }
-        let mut display = String::with_capacity(self.text.len() + self.preedit.len());
-        display.push_str(&self.text[..self.cursor]);
-        display.push_str(&self.preedit);
-        display.push_str(&self.text[self.cursor..]);
-        display
     }
 
     fn clear_preedit(&mut self) {
@@ -1360,7 +1407,9 @@ impl Widget for TextField {
                         ctx.request_layout();
                     }
                     "c" => {
-                        if let Some(selection) = self.selection() {
+                        if self.mode != TextFieldMode::Password
+                            && let Some(selection) = self.selection()
+                        {
                             ctx.request_clipboard(crate::ClipboardRequest::Write(
                                 self.text[selection].to_owned(),
                             ));
@@ -1369,9 +1418,11 @@ impl Widget for TextField {
                     }
                     "x" => {
                         if let Some(selection) = self.selection() {
-                            ctx.request_clipboard(crate::ClipboardRequest::Write(
-                                self.text[selection.clone()].to_owned(),
-                            ));
+                            if self.mode != TextFieldMode::Password {
+                                ctx.request_clipboard(crate::ClipboardRequest::Write(
+                                    self.text[selection.clone()].to_owned(),
+                                ));
+                            }
                             self.record_edit(false);
                             self.delete_selection();
                             self.change(ctx);
@@ -1523,7 +1574,9 @@ impl Widget for TextField {
     fn semantics(&self, ctx: &mut SemanticsCtx<'_>) {
         ctx.push(SemanticNode {
             id: self.id,
-            role: if self.multiline {
+            role: if self.mode == TextFieldMode::Password {
+                SemanticRole::PasswordInput
+            } else if self.multiline {
                 SemanticRole::MultilineTextInput
             } else {
                 SemanticRole::TextInput
@@ -1533,7 +1586,7 @@ impl Widget for TextField {
             disabled: false,
             focused: self.interaction.focused,
             checked: None,
-            value: Some(self.text.clone()),
+            value: (self.mode != TextFieldMode::Password).then(|| self.text.clone()),
             ime_cursor_area: self.interaction.focused.then(|| {
                 let caret = self.caret_geometry(self.display_caret_index());
                 let text_y = if self.multiline {
@@ -1699,13 +1752,23 @@ impl MenuItem {
         on_select: impl FnMut() + 'static,
     ) -> Self {
         let mut on_select = on_select;
+        Self::radio_action(label, selected, move |_| on_select())
+    }
+
+    #[must_use]
+    pub fn radio_action(
+        label: impl Into<String>,
+        selected: bool,
+        on_select: impl FnMut(&mut EventCtx) + 'static,
+    ) -> Self {
+        let mut on_select = on_select;
         Self::with_kind(
             label,
             MenuItemKind::Radio,
             Some(selected),
-            move |selected, _| {
+            move |selected, ctx| {
                 if selected {
-                    on_select();
+                    on_select(ctx);
                 }
             },
         )
@@ -1990,6 +2053,7 @@ impl Widget for Menu {
                             self.set_active(index, ctx);
                             ctx.set_handled();
                         }
+                        crate::SemanticAction::Increment | crate::SemanticAction::Decrement => {}
                     }
                 }
             }
@@ -3109,7 +3173,7 @@ impl Widget for Column {
         let count = self.children.len();
         for child in &mut self.children {
             let child_size = child.layout(ctx, BoxConstraints::loose(constraints.max));
-            child.set_origin(Point::new(0.0, y));
+            child.set_origin(Point::new(self.bounds.x, self.bounds.y + y));
             y += child_size.height + self.gap;
             width = width.max(child_size.width);
         }
@@ -3207,7 +3271,7 @@ impl Widget for Row {
                 ctx,
                 BoxConstraints::loose(Size::new(remaining, constraints.max.height)),
             );
-            child.set_origin(Point::new(x, 0.0));
+            child.set_origin(Point::new(self.bounds.x + x, self.bounds.y));
             x += child_size.width + self.gap;
             height = height.max(child_size.height);
         }
@@ -3369,6 +3433,7 @@ impl Widget for Checkbox {
                     ctx.request_focus(self.id);
                     ctx.set_handled();
                 }
+                crate::SemanticAction::Increment | crate::SemanticAction::Decrement => {}
             },
             Event::FocusChanged(focused) => {
                 let next = *focused == Some(self.id);
@@ -3532,8 +3597,10 @@ impl Widget for Padding {
             ctx,
             constraints.shrink(self.insets.horizontal(), self.insets.vertical()),
         );
-        self.child
-            .set_origin(Point::new(self.insets.left, self.insets.top));
+        self.child.set_origin(Point::new(
+            self.bounds.x + self.insets.left,
+            self.bounds.y + self.insets.top,
+        ));
         let size = constraints.constrain(Size::new(
             child_size.width + self.insets.horizontal(),
             child_size.height + self.insets.vertical(),

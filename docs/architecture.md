@@ -7,13 +7,13 @@ host event
     -> retained widget runtime
     -> event / update / layout / paint / semantics
     -> paint list + damage
-    -> Vello scene
+    -> renderer backend
     -> host render target
 ```
 
 ## Dependency rule
 
-`vui-core` must not depend on Vello, wgpu, winit, Wayland, Smithay, an async
+`vui-core` must not depend on Ash, Vulkan, Vello, wgpu, winit, Wayland, Smithay, an async
 runtime, or any operating-system UI API. Platform and rendering crates depend
 inward on the core.
 
@@ -28,6 +28,62 @@ The core owns widget state, focus, layout, invalidation, semantic information,
 and paint intent. A host owns its event loop, surfaces, clipboard, timers,
 accessibility bridge, and render targets. A renderer translates paint intent
 into pixels.
+
+`vui-ash` is the native desktop backend. Its safe scene stage tessellates the
+complete `PaintList`, including shaped glyph outlines, paths, images, and nested
+clips. Ash pipelines rasterize that geometry on the GPU; stencil operations
+implement clip nesting and a per-frame texture atlas supplies raster images. A
+small audited unsafe boundary owns the Vulkan instance, device, pipelines,
+buffers, swapchain, synchronization, and presentation. The backend selects up
+to 4x MSAA, retains unchanged tessellation and image-atlas uploads, uses two
+frames in flight, and embeds build-time-compiled SPIR-V. Set
+`VUI_VULKAN_VALIDATION=1` to require the Khronos validation layer during local
+diagnostics. `VUI_VULKAN_SAMPLES=1`, `2`, or `4` requests an MSAA count; a
+valid unsupported count falls back to the highest supported lower count, while
+the unset default remains the highest supported count up to 4x. Device telemetry
+reports both requested and selected counts. Compatible adapters are selected deterministically (discrete,
+integrated, virtual, then CPU, with name and enumeration index tie-breakers).
+Set `VUI_VULKAN_DEVICE` to an enumeration index, exact device name, or unique
+case-insensitive name fragment to override that choice. Both renderers expose
+their selected `VulkanDeviceInfo`. The native host has no CPU paint-list
+fallback: scene-construction failures are reported instead of silently changing
+renderers. `vui-winit` depends on this backend and has no Vello or wgpu
+dependency. Vertex and index data live in device-local buffers; per-frame
+host-visible staging buffers feed revision-gated copies with explicit
+transfer-to-vertex-input barriers. `VulkanUploadStats` reports the geometry and
+atlas bytes actually transferred by the latest frame. The image atlas retains
+stable slots across scenes, uploads only newly allocated rectangles, reuses
+freed space, and evicts the least-recently-used inactive images under pressure.
+It repacks only when growth is required. The default 64 MiB ceiling can be
+changed with `VUI_VULKAN_ATLAS_MB` (clamped to 1–256 MiB); scene statistics
+expose occupancy, dirty bytes, evictions, and rebuilds.
+
+The Winit host suspends rendering while a native surface is zero-sized and
+recreates the presenter once after Vulkan reports `ERROR_DEVICE_LOST`, retrying
+the same retained scene on the replacement device. Swapchain out-of-date and
+suboptimal results continue through the resize path. For deterministic recovery
+testing, set `VUI_VULKAN_FAULT` to `acquire-device-lost-once`,
+`submit-device-lost-once`, or `present-device-lost-once`.
+
+The same Ash pipelines render into an offscreen RGBA target for native-backend
+visual regression tests. The checked-in component and typography galleries
+cover light, dark, high-contrast, and fractional-scale output. Scene statistics
+report geometry, index, draw-command, and atlas sizes; the windowed presenter
+reports GPU duration and actual upload bytes. The reproducible renderer
+benchmark and deterministic CI budgets are documented in
+[`performance.md`](performance.md).
+
+`vui-vello` remains an optional compatibility backend for compositor-owned wgpu
+textures. It is not used by the native desktop host or visual-regression suite.
+
+Raw Vulkan embedders use `vui-ash::EmbeddedRenderer`. Its unsafe constructor
+borrows the host's instance, physical device, logical device, graphics queue,
+and queue-family identity without assuming ownership. VUI owns all child
+pipelines, buffers, attachments, and its persistent RGBA target. `render`
+returns the target image and view in `SHADER_READ_ONLY_OPTIMAL` after GPU
+completion, without readback; the borrow prevents target recreation while the
+host inspects those handles. The host externally synchronizes queue access and
+must drop the renderer before destroying its Vulkan context.
 
 Layout uses finite-or-unbounded box constraints. Simple `Row` and `Column`
 containers remain convenient defaults; `Flex` adds proportional allocation,
@@ -51,17 +107,16 @@ composition without special host support.
 ## Icons and shell components
 
 Vector icon geometry enters the paint list as renderer-neutral path commands;
-the Vello backend alone converts them into `kurbo` paths. This keeps icon data,
-custom paths, and shell widgets out of renderer-specific crates. Decorative
+each renderer converts them into its native path representation. This keeps
+icon data, custom paths, and shell widgets out of renderer-specific crates. Decorative
 icons omit semantics, while labeled icons and icon buttons publish image or
 button nodes.
 
 Raster images follow the same split. Core stores validated shared RGBA8 pixels
 and emits an image plus logical destination rectangle. `ImageView` resolves
-contain, cover, or fill geometry and clipping. Vello converts the pixel buffer
-to Peniko image data, caches that upload by the image's stable ID, and prunes
-uploads absent from the current scene. Encoded PNG/JPEG bytes never enter the
-paint or renderer interfaces.
+contain, cover, or fill geometry and clipping. Renderers consume that shared
+pixel buffer without exposing their image resources to core. Encoded PNG/JPEG
+bytes never enter the paint or renderer interfaces.
 
 Desktop-shell components are retained compositions or widgets in `vui-core`.
 Toolbars, navigation regions, status regions, tabs, dialogs, tooltips, and the
@@ -82,8 +137,8 @@ interaction.
 
 Text shaping lives in `vui-text`. It converts Parley layouts into
 renderer-neutral glyph runs containing shared font data, normalized variation
-coordinates, glyph identifiers, and positions. `vui-vello` consumes those runs
-without shaping text again.
+coordinates, glyph identifiers, and positions. `vui-ash` and `vui-vello`
+consume those runs without shaping text again.
 
 Accessibility semantics remain platform neutral in `vui-core`.
 `vui-accesskit` converts each frame's semantic tree to an AccessKit tree update;
@@ -327,10 +382,10 @@ separate:
 ## Visual regression testing
 
 `vui-snapshot` connects the deterministic `TestHarness` frame to
-`vui-vello::SceneBuilder`, renders into a headless RGBA8 wgpu texture, removes
-copy-row padding, and encodes the result as PNG. Snapshot inputs explicitly fix
-logical size, scale factor, theme, background, reduced-motion behavior, and
-Vello's area antialiasing mode. The core harness retains its asset-free
+`vui-ash::GpuSceneBuilder`, renders it through the same Ash pipelines used by
+the native host into a headless RGBA8 Vulkan target, and encodes the result as
+PNG. Snapshot inputs explicitly fix logical size, scale factor, theme,
+background, reduced-motion behavior, and Vulkan sample selection. The core harness retains its asset-free
 bootstrap text system for component snapshots. Typography snapshots instead use
 `ParleyTextSystem::with_embedded_fonts`, which constructs a memory-only Fontique
 collection with system discovery disabled. Checked-in OFL Noto Sans fixtures

@@ -11,6 +11,7 @@ description = "Vello renderer for VUI paint lists"
 documentation = "https://docs.rs/vui-vello"
 
 [dependencies]
+pollster.workspace = true
 vui-core.workspace = true
 vello.workspace = true
 

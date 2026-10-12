@@ -4,6 +4,7 @@ members = [
     "crates/vui-accesskit",
     "crates/vui-text",
     "crates/vui-vello",
+    "crates/vui-ash",
     "crates/vui-winit",
     "crates/vui-testing",
     "crates/vui-resources",
@@ -17,7 +18,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.92"
@@ -47,17 +48,25 @@ async-io = "2.6"
 futures-util = "0.3"
 zbus = "5.19"
 fontique = "0.11.1"
-vui-accesskit = { version = "0.1.0", path = "crates/vui-accesskit" }
-vui-core = { version = "0.1.0", path = "crates/vui-core" }
-vui-platform = { version = "0.1.0", path = "crates/vui-platform" }
-vui-platform-linux = { version = "0.1.0", path = "crates/vui-platform-linux" }
-vui-resources = { version = "0.1.0", path = "crates/vui-resources" }
-vui-session = { version = "0.1.0", path = "crates/vui-session" }
-vui-snapshot = { version = "0.1.0", path = "crates/vui-snapshot" }
-vui-testing = { version = "0.1.0", path = "crates/vui-testing" }
-vui-text = { version = "0.1.0", path = "crates/vui-text" }
-vui-vello = { version = "0.1.0", path = "crates/vui-vello" }
-vui-winit = { version = "0.1.0", path = "crates/vui-winit" }
+ash = "0.38.0"
+ash-window = "0.13.0"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+lyon_tessellation = "1.0.16"
+naga = { version = "30.0.1", features = ["wgsl-in", "spv-out"] }
+raw-window-handle = "0.6.2"
+skrifa = "0.44.0"
+vui-accesskit = { version = "0.2.0", path = "crates/vui-accesskit" }
+vui-core = { version = "0.2.0", path = "crates/vui-core" }
+vui-platform = { version = "0.2.0", path = "crates/vui-platform" }
+vui-platform-linux = { version = "0.2.0", path = "crates/vui-platform-linux" }
+vui-resources = { version = "0.2.0", path = "crates/vui-resources" }
+vui-session = { version = "0.2.0", path = "crates/vui-session" }
+vui-snapshot = { version = "0.2.0", path = "crates/vui-snapshot" }
+vui-testing = { version = "0.2.0", path = "crates/vui-testing" }
+vui-text = { version = "0.2.0", path = "crates/vui-text" }
+vui-vello = { version = "0.2.0", path = "crates/vui-vello" }
+vui-ash = { version = "0.2.0", path = "crates/vui-ash" }
+vui-winit = { version = "0.2.0", path = "crates/vui-winit" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

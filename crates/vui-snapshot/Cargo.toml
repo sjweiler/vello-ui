@@ -7,16 +7,14 @@ rust-version.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Deterministic Vello image snapshots and visual regression testing for VUI"
+description = "Deterministic Ash/Vulkan snapshots and visual regression testing for VUI"
 documentation = "https://docs.rs/vui-snapshot"
 
 [dependencies]
 image.workspace = true
-pollster.workspace = true
-vello.workspace = true
 vui-core.workspace = true
+vui-ash.workspace = true
 vui-testing.workspace = true
-vui-vello.workspace = true
 
 [dev-dependencies]
 vui-text.workspace = true

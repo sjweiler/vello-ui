@@ -1,8 +1,9 @@
 use crate::{
     BoxConstraints, Button, ButtonVariant, Column, CommandDescriptor, DragOperation,
-    DragOperations, DragPayload, DragPreview, Event, EventCtx, Flex, FlexChild, Insets, Key, Label,
-    LayoutCtx, Modifiers, PaintCtx, PaintOp, PathCommand, Point, Rect, SemanticNode, SemanticRole,
-    SemanticsCtx, Size, Surface, SurfaceTone, TextLayout, UiCommand, Widget, WidgetId,
+    DragOperations, DragPayload, DragPreview, Event, EventCtx, Flex, FlexChild, IconButton,
+    IconName, Insets, Key, Label, LayoutCtx, Modifiers, PaintCtx, PaintOp, PathCommand, Point,
+    Rect, SemanticNode, SemanticRole, SemanticsCtx, Size, Spacer, Surface, SurfaceTone, TextLayout,
+    UiCommand, Widget, WidgetId,
 };
 
 fn move_child(bounds: &mut Rect, child: &mut dyn Widget, origin: Point) {
@@ -37,7 +38,8 @@ impl Region {
 impl Widget for Region {
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, constraints: BoxConstraints) -> Size {
         let size = self.child.layout(ctx, constraints);
-        self.child.set_origin(Point::new(0.0, 0.0));
+        self.child
+            .set_origin(Point::new(self.bounds.x, self.bounds.y));
         self.bounds.width = size.width;
         self.bounds.height = size.height;
         size
@@ -180,6 +182,99 @@ impl StatusBar {
     }
 }
 region_widget!(StatusBar);
+
+/// A raised compositor/application panel with an optional overlay close control.
+pub struct Panel {
+    inner: Region,
+}
+
+impl Panel {
+    #[must_use]
+    pub fn new(title: impl Into<String>, body: impl Widget + 'static) -> Self {
+        Self::build(title.into(), body, false)
+    }
+
+    #[must_use]
+    pub fn dismissible(title: impl Into<String>, body: impl Widget + 'static) -> Self {
+        Self::build(title.into(), body, true)
+    }
+
+    fn build(title: String, body: impl Widget + 'static, dismissible: bool) -> Self {
+        let header: Box<dyn Widget> = if dismissible {
+            Box::new(
+                Flex::row([
+                    FlexChild::fixed(Label::new(title.clone()).text_size(20.0)),
+                    FlexChild::flexible(1.0, Spacer::new(0.0, 0.0)),
+                    FlexChild::fixed(IconButton::action(
+                        IconName::Close,
+                        "Close panel",
+                        |_, ctx| ctx.dismiss_overlay(),
+                    )),
+                ])
+                .gap(8.0),
+            )
+        } else {
+            Box::new(Label::new(title.clone()).text_size(20.0))
+        };
+        let content = Column::new([header, Box::new(body) as Box<dyn Widget>]).gap(14.0);
+        let surface = Surface::new(crate::Padding::new(Insets::all(18.0), content))
+            .tone(SurfaceTone::Raised)
+            .elevation(2)
+            .radius(12.0);
+        Self {
+            inner: Region::new(SemanticRole::Group, title, surface),
+        }
+    }
+}
+region_widget!(Panel);
+
+/// A dismissible alert card with optional action buttons.
+pub struct NotificationCard {
+    inner: Region,
+}
+
+impl NotificationCard {
+    #[must_use]
+    pub fn new(title: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::with_actions(title, message, std::iter::empty::<Button>())
+    }
+
+    #[must_use]
+    pub fn with_actions(
+        title: impl Into<String>,
+        message: impl Into<String>,
+        actions: impl IntoIterator<Item = Button>,
+    ) -> Self {
+        let title = title.into();
+        let header = Flex::row([
+            FlexChild::fixed(Label::new(title.clone()).text_size(17.0)),
+            FlexChild::flexible(1.0, Spacer::new(0.0, 0.0)),
+            FlexChild::fixed(IconButton::action(
+                IconName::Close,
+                "Dismiss notification",
+                |_, ctx| ctx.dismiss_overlay(),
+            )),
+        ])
+        .gap(8.0);
+        let mut children = vec![
+            Box::new(header) as Box<dyn Widget>,
+            Box::new(Label::new(message)) as Box<dyn Widget>,
+        ];
+        let actions: Vec<_> = actions.into_iter().map(FlexChild::fixed).collect();
+        if !actions.is_empty() {
+            children.push(Box::new(Flex::row(actions).gap(8.0)));
+        }
+        let content = Column::new(children).gap(10.0);
+        let surface = Surface::new(crate::Padding::new(Insets::all(14.0), content))
+            .tone(SurfaceTone::Raised)
+            .elevation(2)
+            .radius(10.0);
+        Self {
+            inner: Region::new(SemanticRole::Alert, title, surface),
+        }
+    }
+}
+region_widget!(NotificationCard);
 
 pub struct NavigationItem {
     button: Button,
@@ -473,16 +568,18 @@ impl Widget for TabBar {
             }
         }
         self.tab_bounds.clear();
-        let mut x = 0.0;
+        let mut x = self.bounds.x;
         for width in desired.into_iter().take(visible) {
-            self.tab_bounds.push(Rect::new(x, 0.0, width, 38.0));
+            self.tab_bounds
+                .push(Rect::new(x, self.bounds.y, width, 38.0));
             x += width;
         }
-        self.overflow_bounds = (visible < self.tabs.len()).then(|| Rect::new(x, 0.0, 48.0, 38.0));
+        self.overflow_bounds =
+            (visible < self.tabs.len()).then(|| Rect::new(x, self.bounds.y, 48.0, 38.0));
         if self.overflow_bounds.is_some() {
             x += 48.0;
         }
-        let size = constraints.constrain(Size::new(x, 38.0));
+        let size = constraints.constrain(Size::new(x - self.bounds.x, 38.0));
         self.bounds.width = size.width;
         self.bounds.height = size.height;
         size
@@ -594,6 +691,7 @@ impl Widget for TabBar {
                             ctx.request_focus(*target);
                             ctx.set_handled();
                         }
+                        crate::SemanticAction::Increment | crate::SemanticAction::Decrement => {}
                     }
                 }
             }
@@ -837,8 +935,8 @@ impl Widget for CommandPalette {
         self.row_bounds = (0..rows)
             .map(|row| {
                 Rect::new(
-                    8.0,
-                    50.0 + 38.0 * f64::from(u32::try_from(row).unwrap_or(0)),
+                    self.bounds.x + 8.0,
+                    self.bounds.y + 50.0 + 38.0 * f64::from(u32::try_from(row).unwrap_or(0)),
                     (size.width - 16.0).max(0.0),
                     36.0,
                 )

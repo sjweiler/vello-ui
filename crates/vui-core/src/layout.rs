@@ -64,6 +64,10 @@ fn point_from(axis: Axis, main: f64, cross: f64) -> Point {
     }
 }
 
+fn in_bounds(bounds: Rect, point: Point) -> Point {
+    Point::new(bounds.x + point.x, bounds.y + point.y)
+}
+
 fn count_as_f64(count: usize) -> f64 {
     f64::from(u32::try_from(count).unwrap_or(u32::MAX))
 }
@@ -525,11 +529,8 @@ impl Flex {
                     CrossAxisAlignment::Center => (run.cross - child_cross) / 2.0,
                     CrossAxisAlignment::End => run.cross - child_cross,
                 };
-                self.children[index].set_origin(point_from(
-                    self.axis,
-                    main_cursor,
-                    cross_cursor + offset_cross,
-                ));
+                let origin = point_from(self.axis, main_cursor, cross_cursor + offset_cross);
+                self.children[index].set_origin(in_bounds(self.bounds, origin));
                 main_cursor += main + self.gap + extra_gap;
             }
             cross_cursor += run.cross + self.run_gap;
@@ -605,7 +606,10 @@ impl Widget for Flex {
                 CrossAxisAlignment::Center => (container_cross - cross) / 2.0,
                 CrossAxisAlignment::End => container_cross - cross,
             };
-            child.set_origin(point_from(self.axis, cursor, cross_offset));
+            child.set_origin(in_bounds(
+                self.bounds,
+                point_from(self.axis, cursor, cross_offset),
+            ));
             cursor += main + self.gap + extra_gap;
         }
         let size = constraints.constrain(size_from(self.axis, container_main, container_cross));
@@ -762,7 +766,8 @@ impl Widget for SizedBox {
                 .clamp(min.height, constraints.max.height),
         );
         let size = self.child.layout(ctx, BoxConstraints::new(min, max));
-        self.child.set_origin(Point::new(0.0, 0.0));
+        self.child
+            .set_origin(Point::new(self.bounds.x, self.bounds.y));
         self.bounds.width = size.width;
         self.bounds.height = size.height;
         size
@@ -913,7 +918,8 @@ impl Widget for ConstrainedBox {
         } else {
             self.child.layout(ctx, effective)
         };
-        self.child.set_origin(Point::new(0.0, 0.0));
+        self.child
+            .set_origin(Point::new(self.bounds.x, self.bounds.y));
         self.bounds.width = size.width;
         self.bounds.height = size.height;
         size
@@ -987,7 +993,8 @@ impl Widget for Responsive {
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, constraints: BoxConstraints) -> Size {
         self.active = usize::from(constraints.max.width > self.breakpoint);
         let size = self.active_mut().layout(ctx, constraints);
-        self.active_mut().set_origin(Point::new(0.0, 0.0));
+        let origin = Point::new(self.bounds.x, self.bounds.y);
+        self.active_mut().set_origin(origin);
         self.bounds.width = size.width;
         self.bounds.height = size.height;
         size
@@ -1093,7 +1100,7 @@ impl Widget for Stack {
                 CrossAxisAlignment::End => size.height - actual.height,
                 _ => 0.0,
             };
-            child.set_origin(Point::new(x, y));
+            child.set_origin(Point::new(self.bounds.x + x, self.bounds.y + y));
         }
         self.bounds.width = size.width;
         self.bounds.height = size.height;
@@ -1237,11 +1244,24 @@ impl Widget for SplitPane {
             ctx,
             child_constraints(self.axis, second_main, cross, Some(cross)),
         );
-        self.children[0].set_origin(Point::new(0.0, 0.0));
-        self.children[1].set_origin(point_from(self.axis, first_main + self.divider, 0.0));
+        self.children[0].set_origin(Point::new(self.bounds.x, self.bounds.y));
+        self.children[1].set_origin(in_bounds(
+            self.bounds,
+            point_from(self.axis, first_main + self.divider, 0.0),
+        ));
         self.divider_bounds = match self.axis {
-            Axis::Horizontal => Rect::new(first_main, 0.0, self.divider, cross),
-            Axis::Vertical => Rect::new(0.0, first_main, cross, self.divider),
+            Axis::Horizontal => Rect::new(
+                self.bounds.x + first_main,
+                self.bounds.y,
+                self.divider,
+                cross,
+            ),
+            Axis::Vertical => Rect::new(
+                self.bounds.x,
+                self.bounds.y + first_main,
+                cross,
+                self.divider,
+            ),
         };
         self.bounds.width = size.width;
         self.bounds.height = size.height;

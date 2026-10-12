@@ -32,7 +32,8 @@ impl ThemeScope {
 impl Widget for ThemeScope {
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, constraints: BoxConstraints) -> Size {
         let size = ctx.with_theme(&self.theme, |ctx| self.child.layout(ctx, constraints));
-        self.child.set_origin(Point::new(0.0, 0.0));
+        self.child
+            .set_origin(Point::new(self.bounds.x, self.bounds.y));
         self.bounds.width = size.width;
         self.bounds.height = size.height;
         size
@@ -138,8 +139,10 @@ impl Widget for Surface {
             ctx,
             constraints.shrink(self.insets.horizontal(), self.insets.vertical()),
         );
-        self.child
-            .set_origin(Point::new(self.insets.left, self.insets.top));
+        self.child.set_origin(Point::new(
+            self.bounds.x + self.insets.left,
+            self.bounds.y + self.insets.top,
+        ));
         let size = constraints.constrain(Size::new(
             child_size.width + self.insets.horizontal(),
             child_size.height + self.insets.vertical(),
@@ -250,7 +253,8 @@ impl Border {
 impl Widget for Border {
     fn layout(&mut self, ctx: &mut LayoutCtx<'_>, constraints: BoxConstraints) -> Size {
         let size = self.child.layout(ctx, constraints);
-        self.child.set_origin(Point::new(0.0, 0.0));
+        self.child
+            .set_origin(Point::new(self.bounds.x, self.bounds.y));
         self.bounds.width = size.width;
         self.bounds.height = size.height;
         size

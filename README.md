@@ -1,7 +1,8 @@
 # VUI
 
 VUI is an experimental, embeddable Rust UI toolkit with a renderer-neutral
-core and a Vello rendering backend.
+core, a direct Ash/Vulkan desktop backend, and an optional Vello backend for
+wgpu embedding.
 
 The project is deliberately independent of any desktop environment. Windowed
 applications can use `vui-winit`; compositors and other hosts can drive
@@ -22,21 +23,21 @@ The initial vertical slice includes:
 - keyboard-accessible menus, menu buttons, and pointer-position context menus;
 - a typed application model/update/view loop with keyed retained-state reconciliation;
 - typed design tokens, light/dark themes, subtree theme scopes, and state-aware component styles;
-- renderer-neutral vector paths, accessible icons, tooltips, and desktop-shell components;
+- renderer-neutral vector paths, accessible icons, tooltips, popovers, toast stacks, accordions, search fields, dismissible panels, notification cards, window chrome, and desktop-shell components;
 - a scoped command registry shared by shortcuts, buttons, menus, navigation, toolbars, and the command palette;
 - a keyed, fixed-row-height virtualized list with large-data scrolling and desktop selection behavior;
 - a virtualized tree with retained expansion, lazy child states, and desktop tree navigation;
 - a virtualized data table with sortable, resizable, reorderable, and hideable columns;
 - Tab focus traversal with disabled-control filtering;
-- label, button, checkbox, editable text field and text area, row, column, flex, stack, split-pane, sizing, padding, and generic scroll-view widgets;
+- label, button, checkbox, switch, radio button, slider, select, password field, tooltip, spinner, editable text field and text area, row, column, grid, flex, stack, split-pane, sizing, padding, and generic scroll-view widgets;
 - renderer-neutral paint operations and damage reporting;
 - Parley/Fontique shaping with system-font fallback and bidirectional text;
-- Vello scene translation;
+- Ash/Vulkan desktop presentation and Vello scene translation for embedders;
 - live AccessKit integration with semantic updates and action routing;
-- a multi-window winit/Vello desktop host with per-window runtimes;
+- a multi-window winit/Ash desktop host with per-window runtimes;
 - typed window and platform-service commands, native file dialogs, URI/file reveal, attention requests, image clipboard transfer, and external file drop;
 - deterministic single- and multi-window headless testing harnesses.
-- deterministic offscreen Vello snapshots with PNG baselines, tolerance-aware comparison, and failure diff artifacts.
+- deterministic offscreen Ash/Vulkan snapshots with PNG baselines, tolerance-aware comparison, and failure diff artifacts.
 
 Run the example with:
 
@@ -47,8 +48,9 @@ cargo run -p vui-hello
 ## Using VUI
 
 The workspace is intentionally modular. A renderer-neutral embedder can depend
-only on `vui-core`; Vello translation lives in `vui-vello`, native windows in
-`vui-winit`, Linux portal integration in `vui-platform-linux`, deterministic
+only on `vui-core`; direct Vulkan rendering lives in `vui-ash`, optional Vello
+translation lives in `vui-vello`, native windows in `vui-winit`, Linux portal
+integration in `vui-platform-linux`, deterministic
 headless interaction tests in `vui-testing`, and GPU visual regression tooling
 in `vui-snapshot`.
 
@@ -56,24 +58,43 @@ For a native application:
 
 ```toml
 [dependencies]
-vui-core = "0.1.0"
-vui-winit = "0.1.0"
+vui-core = "0.2.0"
+vui-winit = "0.2.0"
 ```
 
 `vui-winit` enables `accessibility` and `system-fonts` by default. Embedded
 hosts can disable both and opt back into either independently:
 
 ```toml
-vui-winit = { version = "0.1.0", default-features = false, features = ["accessibility"] }
+vui-winit = { version = "0.2.0", default-features = false, features = ["accessibility"] }
 ```
 
 The smallest recommended application is in `examples/minimal`; the larger
 `vui-hello` program exercises the component, lifecycle, session, and Linux
 service layers.
 
+## FocalDesk compositor embedding
+
+The FocalDesk nested Vulkan backend can host VUI directly on its existing wgpu
+device and queue. Set `FOCALDESK_VUI=1` when starting that backend to enable the
+experimental compositor-owned panel. VUI renders into a persistent transparent
+GPU texture; FocalDesk composites it without a CPU readback and forwards only
+input that the panel handles. If Vello initialization or rendering fails, the
+adapter removes the retained panel damage and leaves the existing FocalDesk UI
+path running.
+
+Raw Vulkan compositors can instead construct `vui_ash::EmbeddedRenderer` on
+their existing instance, physical device, logical device, graphics queue, and
+queue family. It renders a `UiFrame` into a persistent transparent
+`R8G8B8A8_UNORM` image without a GPU-to-CPU copy and returns the image and view
+in `SHADER_READ_ONLY_OPTIMAL` layout. The host retains ownership of its Vulkan
+context and can composite the returned view directly. The FocalDesk raw
+DRM/Vulkan host uses this boundary directly; its source is maintained outside
+this workspace. The GLES recovery path remains unchanged.
+
 Visual regression tests live in `vui-snapshot`. The checked-in gallery fixes the
-viewport, scale, theme, bootstrap font metrics, animation preference, and Vello
-antialiasing mode. A mismatch writes expected, actual, and amplified-difference
+viewport, scale, theme, bootstrap font metrics, animation preference, and Vulkan
+sample count. A mismatch writes expected, actual, and amplified-difference
 PNGs under `snapshot-artifacts/`.
 
 The shaped-text gallery uses checked-in Noto Sans and Noto Sans Arabic variable
@@ -96,7 +117,7 @@ VUI_UPDATE_SNAPSHOTS=1 cargo test -p vui-snapshot --test gallery
 ```
 
 Set `VUI_REQUIRE_GPU_SNAPSHOTS=1` to fail instead of skip when no compatible
-Vello/wgpu device is available. CI enables this flag and uses software Vulkan.
+Vulkan device is available. CI enables this flag and uses software Vulkan.
 Cross-platform CI sets `VUI_SKIP_GPU_SNAPSHOTS=1`; Linux is the canonical
 baseline renderer while Windows and macOS still compile and test platform-neutral code.
 
@@ -119,7 +140,7 @@ Window management follows an equally explicit boundary. `WindowDescriptor`
 and stable `WindowId` values describe independent native windows, while
 `EventCtx::open_window` and `WindowCommand` request open, close, focus,
 minimize, maximize, fullscreen, and attention operations. Each window owns a
-separate `UiRuntime`, Vello surface, accessibility adapter, focus/overlay/task
+separate `UiRuntime`, Vulkan swapchain, accessibility adapter, focus/overlay/task
 state, animation clock, and scale factor; applications can still share model
 state explicitly. Modal descriptors infer the current window as their parent,
 and closing a parent closes its owned children.

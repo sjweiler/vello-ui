@@ -13,6 +13,12 @@ pub enum SemanticRole {
     Dialog,
     Button,
     Checkbox,
+    Switch,
+    RadioButton,
+    Slider,
+    ComboBox,
+    ProgressIndicator,
+    Alert,
     Menu,
     MenuItem,
     MenuItemCheckbox,
@@ -26,6 +32,7 @@ pub enum SemanticRole {
     ColumnHeader,
     Cell,
     TextInput,
+    PasswordInput,
     MultilineTextInput,
 }
 

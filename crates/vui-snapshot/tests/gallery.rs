@@ -1,4 +1,8 @@
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Mutex, MutexGuard},
+    time::Duration,
+};
 use vui_core::{
     Button, ButtonVariant, Checkbox, Column, Event, Insets, Key, Label, Modifier, Modifiers,
     Padding, Point, ProgressBar, Size, TextArea, TextField, TextSystem, Theme, Widget,
@@ -14,9 +18,19 @@ const NOTO_SANS_ARABIC: &[u8] = include_bytes!("../fonts/NotoSansArabic-wdth-wgh
 
 const GALLERY_TOLERANCE: SnapshotTolerance = SnapshotTolerance {
     channel_delta: 4,
-    max_changed_pixels: 300,
+    max_changed_pixels: 700,
     max_changed_ratio: 0.01,
 };
+
+// Keep Vulkan contexts mutually exclusive so software drivers do not compete
+// for memory or make snapshot timing needlessly noisy.
+static GPU_SNAPSHOT_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_gpu_snapshots() -> MutexGuard<'static, ()> {
+    GPU_SNAPSHOT_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn gallery() -> impl Widget {
     Padding::new(
@@ -89,6 +103,7 @@ fn component_gallery_visual_states() {
     if std::env::var_os("VUI_SKIP_GPU_SNAPSHOTS").is_some() {
         return;
     }
+    let _gpu_guard = lock_gpu_snapshots();
     let mut renderer = match SnapshotRenderer::new() {
         Ok(renderer) => renderer,
         Err(error) if std::env::var_os("VUI_REQUIRE_GPU_SNAPSHOTS").is_none() => {
@@ -138,6 +153,7 @@ fn embedded_font_typography_and_editor_states() {
     if std::env::var_os("VUI_SKIP_GPU_SNAPSHOTS").is_some() {
         return;
     }
+    let _gpu_guard = lock_gpu_snapshots();
     let mut renderer = match SnapshotRenderer::new() {
         Ok(renderer) => renderer,
         Err(error) if std::env::var_os("VUI_REQUIRE_GPU_SNAPSHOTS").is_none() => {

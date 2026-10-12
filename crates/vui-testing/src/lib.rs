@@ -644,16 +644,18 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::{cell::Cell, rc::Rc};
     use vui_core::{
-        App, Button, ButtonVariant, Checkbox, CollectionDrop, Column, Command, CommandButton,
-        CommandHost, CommandPalette, CommandRegistry, CommandScope, ConstrainedBox, ContextMenu,
-        ControlState, CrossAxisAlignment, DesktopApp, Dialog, DropPosition, Flex, FlexChild,
-        FlexWrap, Icon, IconButton, IconName, Insets, Key, KeyChord, Keyed, Label, ListItem,
-        ListView, Menu, MenuButton, MenuItem, Modifier, Modifiers, NavigationItem, OverlayHost,
-        OverlayPlacement, PaintOp, Point, PointerButton, ProgressBar, Rect, Resource,
-        ResourceState, Responsive, Row, ScrollAxes, ScrollView, SemanticAction, SemanticRole,
-        Sidebar, SizedBox, SortDirection, SplitPane, Stack, StatusBar, Surface, SurfaceTone, Tab,
-        TabBar, TableAlignment, TableColumn, TableView, TaskId, TextArea, TextField, ThemeScope,
-        Toolbar, TreeNode, TreeView, Widget, WidgetId, WidgetKey,
+        Accordion, AccordionSection, App, Button, ButtonVariant, Checkbox, CollectionDrop, Column,
+        Command, CommandButton, CommandHost, CommandPalette, CommandRegistry, CommandScope,
+        ConstrainedBox, ContextMenu, ControlState, CrossAxisAlignment, DesktopApp, Dialog,
+        DropPosition, Flex, FlexChild, FlexWrap, Grid, Icon, IconButton, IconName, Insets, Key,
+        KeyChord, Keyed, Label, ListItem, ListView, Menu, MenuButton, MenuItem, Modifier,
+        Modifiers, NavigationItem, NotificationCard, OverlayHost, OverlayPlacement, PaintOp, Panel,
+        Point, PointerButton, Popover, ProgressBar, RadioButton, Rect, Resource, ResourceState,
+        Responsive, Row, ScrollAxes, ScrollView, SearchField, Select, SelectOption, SemanticAction,
+        SemanticRole, Sidebar, SizedBox, Slider, SortDirection, Spinner, SplitPane, Stack,
+        StatusBar, Surface, SurfaceTone, Switch, Tab, TabBar, TableAlignment, TableColumn,
+        TableView, TaskId, TextArea, TextField, ThemeScope, Toast, ToastStack, Toolbar, Tooltip,
+        TreeNode, TreeView, Widget, WidgetId, WidgetKey, WindowChrome,
     };
 
     struct DelayedFrameWidget {
@@ -920,6 +922,248 @@ mod tests {
                 .semantics
                 .iter()
                 .any(|node| node.role == SemanticRole::Button && node.focused)
+        );
+    }
+
+    #[test]
+    fn compositor_controls_support_pointer_keyboard_and_semantics() {
+        let slider_value = Rc::new(Cell::new(0.0));
+        let slider_callback = slider_value.clone();
+        let switch_value = Rc::new(Cell::new(false));
+        let switch_callback = switch_value.clone();
+        let radio_selected = Rc::new(Cell::new(false));
+        let radio_callback = radio_selected.clone();
+        let root = Column::new([
+            Box::new(Slider::new("Volume", 0.0, 0.0..=1.0, move |value| {
+                slider_callback.set(value);
+            })) as Box<dyn Widget>,
+            Box::new(Switch::new("Wi-Fi", false, move |checked| {
+                switch_callback.set(checked);
+            })) as Box<dyn Widget>,
+            Box::new(RadioButton::new("Balanced", false, move || {
+                radio_callback.set(true);
+            })) as Box<dyn Widget>,
+        ])
+        .gap(8.0);
+        let mut harness = TestHarness::new(root, Size::new(300.0, 180.0));
+        let initial = harness.frame();
+        let slider = initial
+            .semantics
+            .iter()
+            .find(|node| node.role == SemanticRole::Slider)
+            .expect("slider semantics");
+        let slider_position = Point::new(
+            slider.bounds.x + slider.bounds.width * 0.75,
+            slider.bounds.y + slider.bounds.height - 12.0,
+        );
+        assert!(harness.event(&Event::PointerDown {
+            position: slider_position,
+            button: PointerButton::Primary,
+            click_count: 1,
+        }));
+        assert!(harness.event(&Event::PointerUp {
+            position: slider_position,
+            button: PointerButton::Primary,
+        }));
+        assert!(slider_value.get() > 0.7);
+        assert!(harness.event(&Event::KeyDown(Key::Home)));
+        assert!(slider_value.get().abs() <= f64::EPSILON);
+
+        let frame = harness.frame();
+        let switch = frame
+            .semantics
+            .iter()
+            .find(|node| node.role == SemanticRole::Switch)
+            .expect("switch semantics");
+        let position = Point::new(switch.bounds.x + 10.0, switch.bounds.y + 10.0);
+        assert!(harness.event(&Event::PointerDown {
+            position,
+            button: PointerButton::Primary,
+            click_count: 1,
+        }));
+        assert!(harness.event(&Event::PointerUp {
+            position,
+            button: PointerButton::Primary,
+        }));
+        assert!(switch_value.get());
+
+        let frame = harness.frame();
+        let radio = frame
+            .semantics
+            .iter()
+            .find(|node| node.role == SemanticRole::RadioButton)
+            .expect("radio semantics");
+        assert!(harness.event(&Event::AccessibilityAction {
+            target: radio.id,
+            action: SemanticAction::Click,
+        }));
+        assert!(radio_selected.get());
+    }
+
+    #[test]
+    fn select_opens_an_accessible_radio_menu_and_updates() {
+        let selected = Rc::new(Cell::new(0));
+        let callback = selected.clone();
+        let select = Select::new(
+            "Power profile",
+            [
+                SelectOption::new("Balanced"),
+                SelectOption::new("Performance"),
+            ],
+            0,
+            move |index| callback.set(index),
+        );
+        let mut harness = TestHarness::new(OverlayHost::new(select), Size::new(320.0, 240.0));
+        let initial = harness.frame();
+        let combo = initial
+            .semantics
+            .iter()
+            .find(|node| node.role == SemanticRole::ComboBox)
+            .expect("combo semantics");
+        assert!(harness.event(&Event::AccessibilityAction {
+            target: combo.id,
+            action: SemanticAction::Click,
+        }));
+        let menu = harness.frame();
+        let performance = menu
+            .semantics
+            .iter()
+            .filter(|node| node.role == SemanticRole::MenuItemRadio)
+            .nth(1)
+            .expect("second menu item");
+        assert!(harness.event(&Event::AccessibilityAction {
+            target: performance.id,
+            action: SemanticAction::Click,
+        }));
+        assert_eq!(selected.get(), 1);
+        let updated = harness.frame();
+        assert!(updated.semantics.iter().any(|node| {
+            node.role == SemanticRole::ComboBox && node.value.as_deref() == Some("Performance")
+        }));
+    }
+
+    #[test]
+    fn password_fields_do_not_paint_or_publish_the_secret() {
+        let mut harness = TestHarness::new(
+            TextField::new("swordfish", |_| {})
+                .password(true)
+                .placeholder("Password"),
+            Size::new(300.0, 80.0),
+        );
+        let frame = harness.frame();
+        let password = frame
+            .semantics
+            .iter()
+            .find(|node| node.role == SemanticRole::PasswordInput)
+            .expect("password semantics");
+        assert_eq!(password.value, None);
+        assert!(!frame.paint.operations().iter().any(|operation| {
+            matches!(operation, PaintOp::Text { text, .. } if text.contains("swordfish"))
+        }));
+    }
+
+    #[test]
+    fn transparent_runtime_omits_the_viewport_clear() {
+        let mut runtime = UiRuntime::new(Label::new("Overlay"));
+        runtime.set_viewport(Size::new(200.0, 80.0));
+        runtime.set_transparent(true);
+        let frame = runtime.render_frame().expect("transparent frame");
+        assert!(!frame.paint.operations().iter().any(|operation| {
+            matches!(operation, PaintOp::FillRect { rect, .. } if *rect == Rect::new(0.0, 0.0, 200.0, 80.0))
+        }));
+    }
+
+    #[test]
+    fn grid_spinner_and_tooltip_compose_for_shell_surfaces() {
+        let grid = Grid::new(
+            2,
+            [
+                Box::new(Tooltip::new("First action", Button::new("One", || {})))
+                    as Box<dyn Widget>,
+                Box::new(Button::new("Two", || {})) as Box<dyn Widget>,
+                Box::new(Spinner::new("Scanning")) as Box<dyn Widget>,
+            ],
+        );
+        let mut harness = TestHarness::new(grid, Size::new(300.0, 140.0));
+        let initial = harness.frame();
+        let buttons: Vec<_> = initial
+            .semantics
+            .iter()
+            .filter(|node| node.role == SemanticRole::Button)
+            .collect();
+        assert_eq!(buttons.len(), 2);
+        assert!(buttons[1].bounds.x > buttons[0].bounds.x);
+        assert!(
+            initial
+                .semantics
+                .iter()
+                .any(|node| node.role == SemanticRole::ProgressIndicator)
+        );
+        let before = initial.paint.operations().len();
+        harness.event(&Event::PointerMoved(Point::new(
+            buttons[0].bounds.x + 2.0,
+            buttons[0].bounds.y + 2.0,
+        )));
+        let hovered = harness.frame();
+        assert!(hovered.paint.operations().len() > before);
+        harness.event(&Event::AppStateChanged);
+        assert!(harness.animation_pending());
+    }
+
+    #[test]
+    fn shell_panel_and_notification_card_publish_and_dismiss() {
+        let open = Button::action("Open panel", |id, ctx| {
+            ctx.show_overlay(
+                id,
+                OverlayPlacement::Below,
+                Panel::dismissible("Network", Label::new("Connected")),
+            );
+        });
+        let mut harness = TestHarness::new(OverlayHost::new(open), Size::new(360.0, 240.0));
+        let initial = harness.frame();
+        let opener = initial
+            .semantics
+            .iter()
+            .find(|node| node.label == "Open panel")
+            .expect("panel opener");
+        assert!(harness.event(&Event::AccessibilityAction {
+            target: opener.id,
+            action: SemanticAction::Click,
+        }));
+        let panel_frame = harness.frame();
+        assert!(
+            panel_frame
+                .semantics
+                .iter()
+                .any(|node| { node.role == SemanticRole::Group && node.label == "Network" })
+        );
+        let close = panel_frame
+            .semantics
+            .iter()
+            .find(|node| node.label == "Close panel")
+            .expect("panel close button");
+        assert!(harness.event(&Event::AccessibilityAction {
+            target: close.id,
+            action: SemanticAction::Click,
+        }));
+        assert!(
+            !harness
+                .frame()
+                .semantics
+                .iter()
+                .any(|node| { node.role == SemanticRole::Group && node.label == "Network" })
+        );
+
+        let mut notification = TestHarness::new(
+            NotificationCard::new("Update ready", "Restart to install"),
+            Size::new(360.0, 140.0),
+        );
+        assert!(
+            notification
+                .frame()
+                .semantics
+                .iter()
+                .any(|node| { node.role == SemanticRole::Alert && node.label == "Update ready" })
         );
     }
 
@@ -3290,6 +3534,183 @@ mod tests {
 
         let frame = harness.frame(secondary).expect("updated secondary frame");
         assert!(frame.semantics.iter().any(|node| node.label == "Count 1"));
+    }
+
+    #[test]
+    fn search_field_clears_and_reports_the_changed_value() {
+        let value = Rc::new(std::cell::RefCell::new(String::new()));
+        let changed = value.clone();
+        let search = SearchField::new("needle", move |text| {
+            changed.replace(text.to_owned());
+        });
+        let mut harness = TestHarness::new(search, Size::new(300.0, 60.0));
+
+        let initial = harness.frame();
+        assert!(
+            initial
+                .semantics
+                .iter()
+                .any(|node| { node.role == SemanticRole::Button && node.label == "Clear search" })
+        );
+        click(&mut harness, Point::new(265.0, 19.0));
+
+        let cleared = harness.frame();
+        assert_eq!(value.borrow().as_str(), "");
+        assert_eq!(text_input_value(&cleared).as_deref(), Some(""));
+        assert!(
+            !cleared
+                .semantics
+                .iter()
+                .any(|node| node.label == "Clear search")
+        );
+    }
+
+    #[test]
+    fn accordion_expands_with_pointer_and_keyboard() {
+        let accordion = Accordion::new([
+            AccordionSection::new("Network", Label::new("Wi-Fi settings")),
+            AccordionSection::new("Audio", Label::new("Volume settings")),
+        ]);
+        let mut harness = TestHarness::new(accordion, Size::new(320.0, 240.0));
+
+        let collapsed = harness.frame();
+        assert!(
+            !collapsed
+                .semantics
+                .iter()
+                .any(|node| node.label == "Wi-Fi settings")
+        );
+        click(&mut harness, Point::new(20.0, 20.0));
+        let expanded = harness.frame();
+        assert!(
+            expanded
+                .semantics
+                .iter()
+                .any(|node| node.label == "Network" && node.checked == Some(true))
+        );
+        assert!(
+            expanded
+                .semantics
+                .iter()
+                .any(|node| node.label == "Wi-Fi settings")
+        );
+
+        assert!(harness.event(&Event::KeyDown(Key::Space)));
+        let collapsed_again = harness.frame();
+        assert!(
+            collapsed_again
+                .semantics
+                .iter()
+                .any(|node| node.label == "Network" && node.checked == Some(false))
+        );
+    }
+
+    #[test]
+    fn toast_stack_runs_actions_and_dismisses_individual_alerts() {
+        let actions = Rc::new(Cell::new(0));
+        let dismissals = Rc::new(Cell::new(0));
+        let action_count = actions.clone();
+        let dismissal_count = dismissals.clone();
+        let toast = Toast::new("Update ready", "Restart to install the update")
+            .action("Restart", move || action_count.set(action_count.get() + 1))
+            .on_dismiss(move || dismissal_count.set(dismissal_count.get() + 1));
+        let mut harness = TestHarness::new(ToastStack::new([toast]), Size::new(400.0, 180.0));
+
+        let initial = harness.frame();
+        let action = initial
+            .semantics
+            .iter()
+            .find(|node| node.label == "Restart")
+            .expect("toast action is accessible")
+            .bounds;
+        click(
+            &mut harness,
+            Point::new(
+                action.x + action.width / 2.0,
+                action.y + action.height / 2.0,
+            ),
+        );
+        assert_eq!(actions.get(), 1);
+        let with_action = harness.frame();
+        let close = with_action
+            .semantics
+            .iter()
+            .find(|node| node.label == "Dismiss Update ready")
+            .expect("toast close button is accessible")
+            .bounds;
+        click(
+            &mut harness,
+            Point::new(close.x + close.width / 2.0, close.y + close.height / 2.0),
+        );
+        assert_eq!(dismissals.get(), 1);
+        assert!(
+            !harness
+                .frame()
+                .semantics
+                .iter()
+                .any(|node| node.role == SemanticRole::Alert)
+        );
+    }
+
+    #[test]
+    fn window_chrome_routes_each_shell_action() {
+        let minimized = Rc::new(Cell::new(0));
+        let maximized = Rc::new(Cell::new(0));
+        let closed = Rc::new(Cell::new(0));
+        let minimize_count = minimized.clone();
+        let maximize_count = maximized.clone();
+        let close_count = closed.clone();
+        let chrome = WindowChrome::new("Files")
+            .on_minimize(move |_| minimize_count.set(minimize_count.get() + 1))
+            .on_maximize(move |_| maximize_count.set(maximize_count.get() + 1))
+            .on_close(move |_| close_count.set(close_count.get() + 1));
+        let mut harness = TestHarness::new(chrome, Size::new(320.0, 42.0));
+
+        harness.frame();
+        click(&mut harness, Point::new(215.0, 21.0));
+        click(&mut harness, Point::new(257.0, 21.0));
+        click(&mut harness, Point::new(299.0, 21.0));
+        assert_eq!(minimized.get(), 1);
+        assert_eq!(maximized.get(), 1);
+        assert_eq!(closed.get(), 1);
+    }
+
+    #[test]
+    fn popover_dismisses_from_an_outside_press() {
+        let dismissals = Rc::new(Cell::new(0));
+        let count = dismissals.clone();
+        let base = SizedBox::new(vui_core::Spacer::new(0.0, 0.0))
+            .fill_width()
+            .fill_height();
+        let popover = Popover::new(
+            base,
+            Rect::new(10.0, 10.0, 20.0, 20.0),
+            OverlayPlacement::Below,
+            Label::new("Quick settings"),
+        )
+        .on_dismiss(move || count.set(count.get() + 1));
+        let mut harness = TestHarness::new(popover, Size::new(300.0, 200.0));
+
+        assert!(
+            harness
+                .frame()
+                .semantics
+                .iter()
+                .any(|node| node.label == "Quick settings")
+        );
+        assert!(harness.event(&Event::PointerDown {
+            position: Point::new(290.0, 190.0),
+            button: PointerButton::Primary,
+            click_count: 1,
+        }));
+        assert_eq!(dismissals.get(), 1);
+        assert!(
+            !harness
+                .frame()
+                .semantics
+                .iter()
+                .any(|node| node.label == "Quick settings")
+        );
     }
 
     fn focused_label(frame: &UiFrame) -> Option<String> {

@@ -4,6 +4,7 @@ mod animation;
 mod app;
 mod collection;
 mod command;
+mod controls;
 mod desktop;
 mod drag;
 mod event;
@@ -16,6 +17,7 @@ mod raster;
 mod runtime;
 mod semantics;
 mod shell;
+mod shell_widgets;
 mod style;
 mod task;
 mod text;
@@ -34,6 +36,7 @@ pub use command::{
     Command, CommandButton, CommandDescriptor, CommandHost, CommandIconButton, CommandId,
     CommandRegistry, CommandScope, KeyChord, ShortcutConflict,
 };
+pub use controls::{Grid, RadioButton, Select, SelectOption, Slider, Spinner, Switch, Tooltip};
 pub use desktop::{DesktopApp, DesktopSender, DesktopWindow};
 pub use drag::{DragOperation, DragOperations, DragPayload, DragPreview};
 pub use event::{
@@ -55,7 +58,13 @@ pub use platform::{
 pub use raster::{ImageFit, ImageView, RasterImage};
 pub use runtime::{UiFrame, UiRuntime};
 pub use semantics::{SemanticNode, SemanticRole};
-pub use shell::{CommandPalette, Dialog, NavigationItem, Sidebar, StatusBar, Tab, TabBar, Toolbar};
+pub use shell::{
+    CommandPalette, Dialog, NavigationItem, NotificationCard, Panel, Sidebar, StatusBar, Tab,
+    TabBar, Toolbar,
+};
+pub use shell_widgets::{
+    Accordion, AccordionSection, Popover, SearchField, Toast, ToastStack, WindowChrome,
+};
 pub use style::{Border, Surface, SurfaceTone, ThemeScope};
 pub use task::{
     CancellationToken, Resource, ResourceState, TaskContext, TaskId, TaskPayload, TaskRequest,

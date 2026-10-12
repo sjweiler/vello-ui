@@ -4,19 +4,10 @@ use std::{
     error::Error,
     fmt, fs,
     path::{Path, PathBuf},
-    sync::mpsc,
-    time::Duration,
 };
-use vello::{
-    AaConfig, RenderParams, Renderer, RendererOptions, peniko::Color as VelloColor,
-    util::RenderContext, wgpu,
-};
-use vui_core::{Color, PaintList, Size, Theme, Widget};
+use vui_ash::{GpuSceneBuilder, OffscreenRenderer};
+use vui_core::{Color, PaintList, Size, Theme, UiFrame, Widget};
 use vui_testing::TestHarness;
-use vui_vello::SceneBuilder;
-
-const BYTES_PER_PIXEL: u32 = 4;
-const COPY_ROW_ALIGNMENT: u32 = 256;
 
 /// Error returned by snapshot rendering, storage, or comparison.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,42 +154,32 @@ impl SnapshotConfig {
     }
 }
 
-/// Reusable headless Vello renderer.
+/// Deterministic offscreen renderer backed by VUI's native Ash pipelines.
 pub struct SnapshotRenderer {
-    context: RenderContext,
-    device_id: usize,
-    renderer: Renderer,
-    scenes: SceneBuilder,
+    renderer: OffscreenRenderer,
+    scenes: GpuSceneBuilder,
 }
 
 impl SnapshotRenderer {
-    /// Creates a headless renderer using the selected wgpu adapter.
+    /// Creates a headless Ash renderer.
     ///
     /// # Errors
     ///
-    /// Returns an error when no compatible adapter exists or Vello initialization fails.
+    /// Returns an error when Vulkan is unavailable or device setup fails.
     pub fn new() -> Result<Self, SnapshotError> {
-        let mut context = RenderContext::new();
-        let device_id = pollster::block_on(context.device(None))
-            .ok_or_else(|| SnapshotError::new("no compatible Vello/wgpu device available"))?;
-        let renderer = Renderer::new(
-            &context.devices[device_id].device,
-            RendererOptions::default(),
-        )
-        .map_err(|error| SnapshotError::new(format!("create Vello renderer: {error}")))?;
         Ok(Self {
-            context,
-            device_id,
-            renderer,
-            scenes: SceneBuilder::new(),
+            renderer: OffscreenRenderer::new()
+                .map_err(|error| SnapshotError::new(format!("create Ash renderer: {error}")))?,
+            scenes: GpuSceneBuilder::new(),
         })
     }
 
-    /// Lays out and captures one widget using a deterministic test harness.
+    /// Lays out and captures one widget through the native Ash renderer.
     ///
     /// # Errors
     ///
-    /// Returns an error when configuration, rendering, or GPU readback fails.
+    /// Returns an error when configuration, scene construction, rendering, or
+    /// GPU readback fails.
     pub fn capture_widget(
         &mut self,
         root: impl Widget + 'static,
@@ -208,11 +189,11 @@ impl SnapshotRenderer {
         self.capture_harness(&mut harness, config)
     }
 
-    /// Captures the current state of an existing deterministic test harness.
+    /// Captures an existing deterministic harness through Ash.
     ///
     /// # Errors
     ///
-    /// Returns an error when configuration, rendering, or GPU readback fails.
+    /// Returns an error when scene construction, rendering, or readback fails.
     pub fn capture_harness(
         &mut self,
         harness: &mut TestHarness,
@@ -222,138 +203,56 @@ impl SnapshotRenderer {
         harness.set_theme(config.theme);
         harness.set_reduced_motion(config.reduced_motion);
         let frame = harness.frame();
-        self.capture_paint(&frame.paint, config)
+        self.capture_frame(&frame, config)
     }
 
-    /// Renders a paint list into a packed RGBA8 snapshot.
+    /// Renders a prepared UI frame through Ash.
     ///
     /// # Errors
     ///
-    /// Returns an error when dimensions are invalid, Vello fails, or readback fails.
+    /// Returns an error when scene construction, rendering, or readback fails.
+    pub fn capture_frame(
+        &mut self,
+        frame: &UiFrame,
+        config: SnapshotConfig,
+    ) -> Result<SnapshotImage, SnapshotError> {
+        let scene = self
+            .scenes
+            .build(frame, config.scale_factor)
+            .map_err(|error| SnapshotError::new(format!("build Ash scene: {error}")))?;
+        let frame = self
+            .renderer
+            .render(&scene, config.background)
+            .map_err(|error| SnapshotError::new(format!("render Ash snapshot: {error}")))?;
+        SnapshotImage::new(frame.width, frame.height, frame.pixels)
+    }
+
+    /// Renders a paint list through Ash.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when dimensions, scene construction, rendering, or
+    /// readback fails.
     pub fn capture_paint(
         &mut self,
         paint: &PaintList,
         config: SnapshotConfig,
     ) -> Result<SnapshotImage, SnapshotError> {
-        let (width, height) = physical_size(&config)?;
-        let scene = self.scenes.build(paint, config.scale_factor);
-        let device = &self.context.devices[self.device_id].device;
-        let queue = &self.context.devices[self.device_id].queue;
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vui snapshot target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let _ = physical_size(&config)?;
+        self.capture_frame(
+            &UiFrame {
+                viewport: config.logical_size,
+                damage: Vec::new(),
+                paint: paint.clone(),
+                semantics: Vec::new(),
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.renderer
-            .render_to_texture(
-                device,
-                queue,
-                scene,
-                &view,
-                &RenderParams {
-                    base_color: VelloColor::from_rgba8(
-                        config.background.r,
-                        config.background.g,
-                        config.background.b,
-                        config.background.a,
-                    ),
-                    width,
-                    height,
-                    antialiasing_method: AaConfig::Area,
-                },
-            )
-            .map_err(|error| SnapshotError::new(format!("render Vello snapshot: {error}")))?;
-
-        let pixels = read_texture(device, queue, &texture, width, height)?;
-        SnapshotImage::new(width, height, pixels)
+            config,
+        )
     }
 }
 
-fn read_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    texture: &wgpu::Texture,
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, SnapshotError> {
-    let unpadded_row = width
-        .checked_mul(BYTES_PER_PIXEL)
-        .ok_or_else(|| SnapshotError::new("snapshot row size overflow"))?;
-    let padded_row = unpadded_row.div_ceil(COPY_ROW_ALIGNMENT) * COPY_ROW_ALIGNMENT;
-    let buffer_size = u64::from(padded_row)
-        .checked_mul(u64::from(height))
-        .ok_or_else(|| SnapshotError::new("snapshot buffer size overflow"))?;
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("vui snapshot readback"),
-        size: buffer_size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("vui snapshot copy"),
-    });
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded_row),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    let submission = queue.submit([encoder.finish()]);
-    let (sender, receiver) = mpsc::sync_channel(1);
-    readback.map_async(wgpu::MapMode::Read, .., move |result| {
-        let _ = sender.send(result);
-    });
-    device
-        .poll(wgpu::PollType::Wait {
-            submission_index: Some(submission),
-            timeout: Some(Duration::from_secs(30)),
-        })
-        .map_err(|error| SnapshotError::new(format!("wait for snapshot readback: {error}")))?;
-    receiver
-        .recv_timeout(Duration::from_secs(30))
-        .map_err(|error| SnapshotError::new(format!("receive snapshot readback: {error}")))?
-        .map_err(|error| SnapshotError::new(format!("map snapshot readback: {error}")))?;
-
-    let mapped = readback
-        .get_mapped_range(..)
-        .map_err(|error| SnapshotError::new(format!("read mapped snapshot: {error}")))?;
-    let row_len = usize::try_from(unpadded_row)
-        .map_err(|_| SnapshotError::new("snapshot row is too large"))?;
-    let padded_len = usize::try_from(padded_row)
-        .map_err(|_| SnapshotError::new("padded snapshot row is too large"))?;
-    let mut pixels = Vec::with_capacity(image_len(width, height)?);
-    for row in mapped.chunks_exact(padded_len) {
-        pixels.extend_from_slice(&row[..row_len]);
-    }
-    drop(mapped);
-    readback.unmap();
-    Ok(pixels)
-}
+/// Compatibility name for callers that explicitly selected the Ash renderer.
+pub type AshSnapshotRenderer = SnapshotRenderer;
 
 /// Maximum accepted image difference.
 #[derive(Clone, Copy, Debug, PartialEq)]
